@@ -1,3 +1,5 @@
+> Historical measurements below describe the first listener-side suppression implementation. Independent review identified recovery risks; the current revision suppresses refreshes in QML only for a currently live matching device, retains stateless monitor reports, handles unpairing as offline, and only trusts receiver paths from live reads. The preliminary listener event-count reduction is not a claim about current monitor output. A fresh installed-plugin comparison of the revised code is recorded below.
+
 # Solaarchy controlled performance measurements
 
 Hardware: MX Mechanical Mini on Bolt (/dev/hidraw3) and G502 X Lightspeed (/dev/hidraw7). Original source is the installed plugin repository HEAD before the local patch; patched source is the staged change in this checkout. Solaar 1.1.20-2. No Solaar package files changed.
@@ -41,3 +43,7 @@ Short sampling windows, sequential installed-plugin phases, changing wireless st
 After ten seconds of settling per version, process sampling over 60 seconds observed **12 distinct status helpers with original code and zero with patched code**. Original helpers accumulated approximately **14.46 CPU seconds** in the sampled process counters; patched helpers accumulated zero because none launched in its window. This corresponds to about 24% of one logical core spent on original status helpers during this particular minute, not a claim about whole-machine CPU or long-term averages. Sampling can miss the last CPU ticks before exit. Both phases kept the same connected hardware and included no manual toggles. The phases were sequential rather than simultaneous, so wireless traffic may vary; the simultaneous raw-monitor result independently confirms duplicate reports on the same stream. The configured five-minute backup poll remains enabled, so zero scans in one patched minute does not mean zero ongoing scan cost.
 
 The patched version is restored in the installed plugin. This demonstrates a material reduction in redundant background work on this machine, while the separate command benchmark establishes no meaningful direct backlight-command speed improvement.
+
+## Review-corrected implementation: fresh installed-plugin comparison
+
+The current QML live-state filter was re-tested with 10 seconds of settling, then 30 seconds of sampling per version. Original: 0 observed status helpers, 0.00 observed CPU-seconds. Revised patch: 12 helpers, 12.88 CPU-seconds. These are sequential short windows, not a claim about long-term averages. The installed plugin was restored to the revised patch afterward. Node tests exercise suppression of 1,000 repeated live reports and recovery for stale, offline, unknown, reconnect, and hotplug cases; Python tests cover unpair and link report parsing.

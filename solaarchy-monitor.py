@@ -18,8 +18,6 @@ import os
 import select
 import sys
 
-from solaarchy_common import LinkStates
-
 sys.stdout, _stdout = sys.stderr, sys.stdout  # keep Solaar's import noise off the pipe
 try:
     import pyudev
@@ -48,6 +46,10 @@ def parse(data):
     if len(data) < 5:
         return None
     report_id, number, sub_id, address = data[0], data[1], data[2], data[3]
+    # HID++ receiver unpairing must make a subsequent online report refresh
+    # even when a different device takes the same pairing slot.
+    if report_id in (HIDPP_SHORT, HIDPP_LONG) and sub_id == 0x40 and address == 0x02:
+        return number, False
     if report_id in (HIDPP_SHORT, HIDPP_LONG) and sub_id == DJ_PAIRING and address != 0x00:
         online = True if address == EX100_ADDRESS else not (data[4] & 0x40)
         return number, online
@@ -65,7 +67,6 @@ def hidpp_paths():
 
 def main():
     fds = {}  # fd -> path
-    links = LinkStates()
 
     def sync():
         """Match open fds to the HID++ nodes present; True if that set changed."""
@@ -73,7 +74,6 @@ def main():
         before = set(fds.values())
         for fd, path in list(fds.items()):
             if path not in wanted:
-                links.remove(path)
                 os.close(fd)
                 del fds[fd]
         opened = set(fds.values())
@@ -116,13 +116,12 @@ def main():
                 # Unplugged: the node fails before udev announces the removal,
                 # and once the fd is dropped that udev event looks like no
                 # change, so report it here.
-                links.remove(path)
                 os.close(fd)
                 del fds[fd]
                 emit({"event": "hotplug"})
                 continue
             link = parse(data)
-            if link is not None and links.changed(path, *link):
+            if link is not None:
                 emit({"event": "link", "path": path, "number": link[0], "online": link[1]})
 
 

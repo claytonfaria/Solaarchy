@@ -784,6 +784,14 @@ BarWidget {
     if (ev.event === "error") { monitorError = String(ev.error || "monitor failed"); return }
     monitorError = ""
     if (ev.event === "link" && !ev.online && markOffline(ev.path, ev.number)) return
+    // Compare with the current scan result, not a listener-side cache: a
+    // device can stop answering pings without a link-lost notification.
+    if (ev.event === "link" && ev.online) {
+      for (var i = 0; i < devices.length; i++) {
+        var d = devices[i]
+        if (d.path === ev.path && d.number === ev.number && isLive(d)) return
+      }
+    }
     if (ev.event === "link" || ev.event === "hotplug") eventRefresh.restart()
   }
 
@@ -838,7 +846,7 @@ BarWidget {
     // Use the receiver we already discovered instead of opening every receiver.
     // Keep the device identity check: a stale/reused path must not select a slot
     // on an unrelated receiver. Older saved state without a path still works.
-    if (device.path && /^\/dev\/hidraw[0-9]+$/.test(String(device.path)))
+    if (isLive(device) && device.path && /^\/dev\/hidraw[0-9]+$/.test(String(device.path)))
       command.push("--hidraw", String(device.path))
     return command.concat(["config", solaarDeviceArg(device), "backlight",
       target === 1 ? "lowest" : "highest"])
@@ -1352,6 +1360,7 @@ BarWidget {
       backlightProc.running = false
       root.pendingBacklight = ({})
       root.actionError = "Timed out switching the backlight"
+      Qt.callLater(root.refresh)
       // Whoever waits on the switch hears of it even if the kill reports no exit.
       var done = root.backlightDone
       root.backlightDone = null
