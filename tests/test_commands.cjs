@@ -45,12 +45,9 @@ vm.runInContext(extract('handleMonitorLine'), ctx);
 ctx.monitorError = '';
 ctx.eventRefresh = {restart() { ctx.refreshRequests++; }};
 ctx.refreshRequests = 0;
-ctx.markOffline = (path, number) => {
-  const d = ctx.devices.find(d => d.path === path && d.number === number);
-  if (!d) return false;
-  d.online = false;
-  return true;
-};
+vm.runInContext(extract('markStale') + '\n' + extract('markOffline'), ctx);
+ctx.checkConnections = () => {};
+ctx.saveState = () => {};
 ctx.devices = [{path: '/dev/hidraw7', number: 1, online: true, stale: false}];
 const event = {event: 'link', path: '/dev/hidraw7', number: 1, online: true};
 for (let i=0; i<1000; i++) ctx.handleMonitorLine(JSON.stringify(event));

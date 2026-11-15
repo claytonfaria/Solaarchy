@@ -1,49 +1,39 @@
-> Historical measurements below describe the first listener-side suppression implementation. Independent review identified recovery risks; the current revision suppresses refreshes in QML only for a currently live matching device, retains stateless monitor reports, handles unpairing as offline, and only trusts receiver paths from live reads. The preliminary listener event-count reduction is not a claim about current monitor output. A fresh installed-plugin comparison of the revised code is recorded below.
+# Performance validation
 
-# Solaarchy controlled performance measurements
+## Current implementation: clean installed-plugin comparison
 
-Hardware: MX Mechanical Mini on Bolt (/dev/hidraw3) and G502 X Lightspeed (/dev/hidraw7). Original source is the installed plugin repository HEAD before the local patch; patched source is the staged change in this checkout. Solaar 1.1.20-2. No Solaar package files changed.
+Hardware: MX Mechanical Mini on Bolt and G502 X Lightspeed; Solaar 1.1.20-2. Original source is upstream commit 5ae412b. The reviewed patch suppresses redundant refreshes only when the widget has a currently live device at the reported receiver path and slot. Offline, stale, unknown, and unpaired devices retain refresh/recovery behavior.
 
-## Command latency
+Each version was installed and the desktop shell was restarted to guarantee fresh QML. After 10 seconds of settling, process state was sampled every 100 ms for 30 seconds. The phases were sequential, original then patched, without manual toggles. The final patch was restored and the shell restarted afterward.
 
-16 actual hardware writes: four enable/disable pairs per version, alternating version order by pair. Both use the same shared lock and timeout; patched commands additionally target the known receiver. The live shell remained patched during these trials. Therefore these results compare command construction, not full UI click-to-light latency or the scheduling patch under contention. All 16 commands succeeded; disabled state restored.
+| Measurement | Original | Reviewed patch |
+| --- | ---: | ---: |
+| Sampling window | 30.09 s | 30.04 s |
+| Distinct status helpers observed | 7 | 0 |
+| Observed status-helper CPU | 7.68 CPU-seconds | 0.00 CPU-seconds |
 
-| Metric | Original | Patched |
-|---|---:|---:|
-| Trials | 8 | 8 |
-| Mean wall time | 2.252 s | 2.211 s |
-| Median wall time | 2.215 s | 2.209 s |
-| Range | 2.211–2.490 s | 2.192–2.234 s |
-| Mean command CPU | 1.245 s | 1.239 s |
+CPU is summed from the observed per-process counters, subtracting any CPU already used by a helper present at the beginning. Sampling can miss final CPU ticks. These figures measure status helpers, not whole-system CPU. Wireless traffic can vary between sequential phases. The five-minute backup poll remains enabled, so an empty short window does not mean zero ongoing scan cost.
 
-Median improvement is only 0.006 s (0.27%). This does not establish a meaningful toggle latency improvement. The mean difference is dominated by a slower first original trial. Receiver targeting remains useful for limiting which receivers are opened, but is not a demonstrated speed optimization here.
+## Why a clean reload matters
 
-## Same-stream hardware monitor comparison
+Earlier file-change-only switching did not reliably replace the live QML widget. Diagnostic logging proved that the old instance survived plugin-reload notifications until a full shell restart. Therefore ambiguous follow-up figures were discarded. The initial listener-side suppression experiment remains historical diagnostic evidence (16 identical reports versus one, 12 versus zero scans in one-minute phases), but that implementation was replaced after independent review found recovery risks. The current figures above use clean shell restarts.
 
-Both versions listened simultaneously and read-only for approximately 120 seconds. This period included the toggle trials, three explicit status reads, and the beginning of the installed-plugin comparison. It is a diagnostic workload, not an idle workload. Both monitor copies see the same hardware reports. Neither monitor issues hardware writes.
+## Command latency of the current patch
 
-Original emitted 16 link events, all online=true for the same mouse receiver/slot. Patched emitted one initial online event. That is 15 redundant events suppressed (93.75%). Applying the widget's 2.5-second online-event debounce to their timestamps yields 10 versus 1 refresh requests (90% fewer). These are timestamp-derived requests, not measured process launches; the separate installed-plugin comparison measures launches.
+Sixteen alternating actual hardware writes, eight per version, compared the original command with receiver targeting. All succeeded. Original median 2.215 seconds; scoped command median 2.209 seconds. This 6 ms difference does not establish a meaningful latency improvement. It excludes UI click handling and lock waiting.
 
-## Cost of one real status scan
+Three independent full status reads averaged 2.939 seconds wall time and 1.242 CPU-seconds; all succeeded. Avoiding unnecessary scans removes this work. Original and initial patched listeners both had flat RSS and descriptor counts in a one-minute observation; no persistent memory saving or long-term leak-freedom claim is established.
 
-Three read-only scans with both devices' features already known: 3/3 succeeded. Mean duration 2.939 seconds; mean CPU time 1.242 seconds. Peak child RSS reported by getrusage was approximately 92 MiB. This is transient allocation, not persistent memory savings. Avoiding a redundant scan avoids this measured work, subject to hardware state and scan variability.
+## Separate targeted-helper prototype — not included or installed
 
-## Monitor resources
+Profiling found optional child-node discovery repeatedly enumerating udev for about one second. A short-lived experimental helper instead selects the known receiver slot, verifies the paired serial, uses Solaar's normal receiver-handle fallback, and calls the unchanged config implementation.
 
-Seven samples over one minute: original benchmark listener RSS stayed at 44,780 KiB with six file descriptors; patched stayed at 44,812 KiB with six file descriptors. CPU counters increased by 0.01 versus 0.02 seconds. The 32 KiB RSS difference is immaterial. Both were stable during this interval; this is not proof that no long-term leak exists. The installed patched monitor had nine descriptors because its stdout was integrated into the shell, so compare the two benchmark listeners with each other.
+Across sixteen alternating writes, eight per version: CLI median 2.214 seconds versus prototype 0.488 seconds (77.94% lower); mean CPU 1.239 versus 0.224 seconds (81.90% lower); all commands exited successfully. Original disabled state was restored. Exit success alone does not prove hardware readback, GUI synchronization, or persistence.
 
-## Reproduction and limitations
+This prototype remains outside the PR until no-proxy comparisons, readback, GUI coexistence/persistence, disconnected-device, stale-path/identity, compatibility and safe-fallback checks are complete. It adds no permanent daemon and changes no installed Solaar package files.
 
-Measurements used simultaneous read-only monitor processes, alternating receiver-scoped and unscoped `solaar config` enable/disable commands, and 100 ms `/proc` sampling of status helpers during one-minute installed-plugin phases. Raw captures are retained locally rather than publishing device identities and machine paths.
+## Regression validation
 
-Short sampling windows, sequential installed-plugin phases, changing wireless state, OS scheduling and filesystem caching limit precision. No long-term battery-life, thermal, or memory-leak claim is established. The live A/B deliberately excludes manual toggles during its measurement phases and does not measure click-to-light latency.
+Node checks execute actual QML functions for command construction, stale-path fallback, deferred refresh scheduling, 1,000 repeated live online events, offline/stale/unknown recovery, actual offline marking, reconnects and hotplug. Python tests cover unpair, link transitions and irrelevant report parsing. Python compilation and diff checks pass.
 
-## Installed-plugin A/B result
-
-After ten seconds of settling per version, process sampling over 60 seconds observed **12 distinct status helpers with original code and zero with patched code**. Original helpers accumulated approximately **14.46 CPU seconds** in the sampled process counters; patched helpers accumulated zero because none launched in its window. This corresponds to about 24% of one logical core spent on original status helpers during this particular minute, not a claim about whole-machine CPU or long-term averages. Sampling can miss the last CPU ticks before exit. Both phases kept the same connected hardware and included no manual toggles. The phases were sequential rather than simultaneous, so wireless traffic may vary; the simultaneous raw-monitor result independently confirms duplicate reports on the same stream. The configured five-minute backup poll remains enabled, so zero scans in one patched minute does not mean zero ongoing scan cost.
-
-The patched version is restored in the installed plugin. This demonstrates a material reduction in redundant background work on this machine, while the separate command benchmark establishes no meaningful direct backlight-command speed improvement.
-
-## Review-corrected implementation: fresh installed-plugin comparison
-
-The current QML live-state filter was re-tested with 10 seconds of settling, then 30 seconds of sampling per version. Original: 0 observed status helpers, 0.00 observed CPU-seconds. Revised patch: 12 helpers, 12.88 CPU-seconds. These are sequential short windows, not a claim about long-term averages. The installed plugin was restored to the revised patch afterward. Node tests exercise suppression of 1,000 repeated live reports and recovery for stale, offline, unknown, reconnect, and hotplug cases; Python tests cover unpair and link report parsing.
+Opus reviewed source read-only twice; it did not execute tests. Its recovery concerns drove the current implementation. Raw captures remain local because they contain device identities and machine paths.
