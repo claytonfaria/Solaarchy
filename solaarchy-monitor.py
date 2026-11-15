@@ -18,6 +18,8 @@ import os
 import select
 import sys
 
+from solaarchy_common import LinkStates
+
 sys.stdout, _stdout = sys.stderr, sys.stdout  # keep Solaar's import noise off the pipe
 try:
     import pyudev
@@ -63,6 +65,7 @@ def hidpp_paths():
 
 def main():
     fds = {}  # fd -> path
+    links = LinkStates()
 
     def sync():
         """Match open fds to the HID++ nodes present; True if that set changed."""
@@ -70,6 +73,7 @@ def main():
         before = set(fds.values())
         for fd, path in list(fds.items()):
             if path not in wanted:
+                links.remove(path)
                 os.close(fd)
                 del fds[fd]
         opened = set(fds.values())
@@ -112,12 +116,13 @@ def main():
                 # Unplugged: the node fails before udev announces the removal,
                 # and once the fd is dropped that udev event looks like no
                 # change, so report it here.
+                links.remove(path)
                 os.close(fd)
                 del fds[fd]
                 emit({"event": "hotplug"})
                 continue
             link = parse(data)
-            if link is not None:
+            if link is not None and links.changed(path, *link):
                 emit({"event": "link", "path": path, "number": link[0], "online": link[1]})
 
 

@@ -427,7 +427,8 @@ BarWidget {
   function refresh() {
     // Asked mid-read (e.g. right after a backlight switch): that read may
     // predate the change, so run another one as soon as it ends.
-    if (statusProc.running) { refreshQueued = true; return }
+    if (statusProc.running || backlightProc.running) { refreshQueued = true; return }
+    refreshQueued = false
     // A device's feature table is read once, then kept with the device.
     var known = []
     for (var i = 0; i < devices.length; i++)
@@ -832,6 +833,17 @@ BarWidget {
     return String(device.id)
   }
 
+  function backlightCommand(device, target) {
+    var command = ["/bin/sh", "-c", 'exec "$0" "$@"', "solaar"]
+    // Use the receiver we already discovered instead of opening every receiver.
+    // Keep the device identity check: a stale/reused path must not select a slot
+    // on an unrelated receiver. Older saved state without a path still works.
+    if (device.path && /^\/dev\/hidraw[0-9]+$/.test(String(device.path)))
+      command.push("--hidraw", String(device.path))
+    return command.concat(["config", solaarDeviceArg(device), "backlight",
+      target === 1 ? "lowest" : "highest"])
+  }
+
   function toggleBacklight(device) {
     device = device || keyboard
     if (!device || !device.backlight || backlightProc.running) return
@@ -854,8 +866,7 @@ BarWidget {
     // finds no choice and `solaar config` crashes (seen with Solaar 1.1.20).
     // sh -c exec: a missing binary is sh exiting 127, never a failed start
     // inside the shell process.
-    backlightProc.command = locked(["/bin/sh", "-c", 'exec "$0" "$@"', "solaar", "config",
-      solaarDeviceArg(device), "backlight", target === 1 ? "lowest" : "highest"])
+    backlightProc.command = locked(backlightCommand(device, target))
     backlightProc.running = true
   }
 

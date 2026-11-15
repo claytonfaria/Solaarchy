@@ -128,3 +128,26 @@ def device_id(dev, path):
     if path and number is not None:
         return f"{path}:{number}"
     return safe(lambda: dev.wpid)
+
+
+class LinkStates:
+    """Remember receiver-slot transitions, bounded by currently open nodes.
+
+    Repeated connection reports are common even without a link transition.
+    Preserve the first report and every transition, but avoid waking a full
+    status scan for each duplicate. Forget unplugged paths so reused hidraw
+    names and pairing slots always report their initial state again.
+    """
+
+    def __init__(self):
+        self._paths = {}
+
+    def changed(self, path, number, online):
+        slots = self._paths.setdefault(path, {})
+        if number in slots and slots[number] == online:
+            return False
+        slots[number] = online
+        return True
+
+    def remove(self, path):
+        self._paths.pop(path, None)
